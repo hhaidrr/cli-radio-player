@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -21,11 +20,6 @@ type Station struct {
 	Name        string
 	URL         string
 	Description string
-}
-
-// YouTubeInfo represents the JSON output from yt-dlp --dump-json
-type YouTubeInfo struct {
-	URL string `json:"url"`
 }
 
 var defaultStations = []Station{
@@ -108,32 +102,29 @@ func (p *Player) Restart(url string) error {
 }
 
 // resolvePlayableURL returns a direct media URL that ffplay can consume.
-// For YouTube links, it uses yt-dlp to extract the audio URL from video info (same as Python approach).
+// For YouTube links, it uses yt-dlp -g to get the direct audio URL (same as your working command).
 func resolvePlayableURL(originalURL string) (string, error) {
 	if !isYouTubeURL(originalURL) {
 		return originalURL, nil
 	}
 
-	// Use yt-dlp to get video info and extract audio URL (same as Python extract_info approach)
-	cmd := exec.Command(ytdlpBinary, "--no-warnings", "--no-check-certificate", "--extractor-args", "youtube:player_client=android", "-f", "bestaudio/best", "--dump-json", originalURL)
+	// Use yt-dlp -g to get the direct audio URL (same as your working command)
+	cmd := exec.Command(ytdlpBinary, "-g", "-f", "bestaudio/best", originalURL)
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("yt-dlp failed: %v, stderr: %s", err, stderr.String())
 	}
-	
-	// Parse JSON output to get the audio URL
-	var info YouTubeInfo
-	if err := json.Unmarshal(stdout.Bytes(), &info); err != nil {
-		return "", fmt.Errorf("failed to parse yt-dlp JSON output: %v", err)
-	}
-	
-	if info.URL == "" {
+
+	output := strings.TrimSpace(stdout.String())
+	if output == "" {
 		return "", fmt.Errorf("yt-dlp did not return a media URL, stderr: %s", stderr.String())
 	}
-	
-	return info.URL, nil
+
+	// Return the first line (the audio URL)
+	lines := strings.Split(output, "\n")
+	return strings.TrimSpace(lines[0]), nil
 }
 
 var ytRegexp = regexp.MustCompile(`(?i)^(https?://)?(www\.)?(youtube\.com|youtu\.be)/`)
@@ -148,15 +139,15 @@ func checkDependencies() error {
 	if _, err := exec.LookPath("ffplay"); err != nil {
 		return fmt.Errorf("ffplay not found. Please install FFmpeg: sudo apt install ffmpeg")
 	}
-	
+
 	// Check for yt-dlp (needed for YouTube URLs) - use system yt-dlp
 	if _, err := exec.LookPath("yt-dlp"); err != nil {
 		return fmt.Errorf("yt-dlp not found. Please install yt-dlp: sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && sudo chmod a+rx /usr/local/bin/yt-dlp")
 	}
-	
+
 	// Use system yt-dlp
 	ytdlpBinary = "yt-dlp"
-	
+
 	return nil
 }
 
