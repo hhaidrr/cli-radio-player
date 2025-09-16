@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -60,7 +61,11 @@ func (p *Player) Start(url string) error {
 	if p.cmd != nil && p.cmd.Process != nil {
 		return errors.New("player already running")
 	}
-	args := p.ffplayArgs(url)
+	resolved, err := resolvePlayableURL(url)
+	if err != nil {
+		return err
+	}
+	args := p.ffplayArgs(resolved)
 	p.cmd = exec.Command("ffplay", args...)
 	p.cmd.Stdout = os.Stdout
 	p.cmd.Stderr = os.Stderr
@@ -94,6 +99,49 @@ func (p *Player) Restart(url string) error {
 	// slight delay to allow ffplay to exit
 	time.Sleep(200 * time.Millisecond)
 	return p.Start(url)
+}
+
+// resolvePlayableURL returns a direct media URL that ffplay can consume.
+// For YouTube links, it shells out to yt-dlp to extract the best audio stream URL.
+func resolvePlayableURL(originalURL string) (string, error) {
+	if !isYouTubeURL(originalURL) {
+		return originalURL, nil
+	}
+
+	// Use yt-dlp to get the direct media URL (-g prints URL only)
+	cmd := exec.Command("yt-dlp", "-f", "bestaudio/best", "-g", originalURL)
+	cmd.Stdout = &strings.Builder{}
+	cmd.Stderr = &strings.Builder{}
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("yt-dlp failed: %v", err)
+	}
+	stdout := cmd.Stdout.(*strings.Builder).String()
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) == "" {
+		return "", errors.New("yt-dlp did not return a media URL")
+	}
+	return strings.TrimSpace(lines[0]), nil
+}
+
+var ytRegexp = regexp.MustCompile(`(?i)^(https?://)?(www\.)?(youtube\.com|youtu\.be)/`)
+
+func isYouTubeURL(u string) bool {
+	return ytRegexp.MatchString(u)
+}
+
+// checkDependencies verifies that required external tools are available
+func checkDependencies() error {
+	// Check for ffplay
+	if _, err := exec.LookPath("ffplay"); err != nil {
+		return fmt.Errorf("ffplay not found. Please install FFmpeg: sudo apt install ffmpeg")
+	}
+
+	// Check for yt-dlp (needed for YouTube URLs)
+	if _, err := exec.LookPath("yt-dlp"); err != nil {
+		return fmt.Errorf("yt-dlp not found. Please install yt-dlp: sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && sudo chmod a+rx /usr/local/bin/yt-dlp")
+	}
+
+	return nil
 }
 
 func (p *Player) SetVolume(percent int) {
@@ -204,6 +252,12 @@ func interactiveMode(ctx context.Context, p *Player, stations []Station, startId
 }
 
 func main() {
+	// Check dependencies first
+	if err := checkDependencies(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
 	var (
 		flagList        bool
 		flagInteractive bool

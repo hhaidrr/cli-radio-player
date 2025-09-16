@@ -6,17 +6,20 @@ A simple CLI radio player that streams lofi stations using `ffplay` (from FFmpeg
 
 - Go 1.20+
 - FFmpeg (provides `ffplay`)
+- yt-dlp (for resolving YouTube stream URLs)
 
 On Ubuntu/Debian:
 
 ```bash
-sudo apt update && sudo apt install -y ffmpeg
+sudo apt update && sudo apt install -y ffmpeg python3-pip
+python3 -m pip install --upgrade yt-dlp
 ```
 
 Verify:
 
 ```bash
 ffplay -version
+yt-dlp --version
 ```
 
 ## Build
