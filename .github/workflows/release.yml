@@ -48,3 +48,5 @@ jobs:
           asset_path: ./bin/drift-radio-${{ matrix.goos }}-${{ matrix.goarch }}
           asset_name: drift-radio-${{ matrix.goos }}-${{ matrix.goarch }}
           asset_content_type: application/octet-stream
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
