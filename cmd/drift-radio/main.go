@@ -47,7 +47,14 @@ func (p *Player) ffplayArgs(url string) []string {
 	// ffplay volume uses dB via -af volume=...; map 0-100% to -20..+0 dB approx
 	volDb := float64(p.volumePercent)/100*0 - 20*(1-float64(p.volumePercent)/100)
 	volFilter := fmt.Sprintf("volume=%fdB", volDb)
-	args := []string{"-nodisp", "-autoexit", "-loglevel", "warning", "-af", volFilter, url}
+	args := []string{
+		"-nodisp",
+		"-autoexit",
+		"-loglevel", "error", // Reduce log level to only show errors
+		"-hide_banner", // Hide ffplay banner
+		"-af", volFilter,
+		url,
+	}
 	if p.visualization {
 		// Use showwavespic as a lightweight visualization in a separate window
 		// However -nodisp disables it; keep nodisp for headless. Toggle simply prints a note.
