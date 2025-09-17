@@ -91,13 +91,33 @@ func (p *Player) Stop() error {
 		return nil
 	}
 	p.isStopped = true
-	return p.cmd.Process.Signal(syscall.SIGTERM)
+
+	// Send SIGTERM to stop the process
+	if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		return err
+	}
+
+	// Wait for the process to actually exit
+	done := make(chan error, 1)
+	go func() {
+		done <- p.cmd.Wait()
+	}()
+
+	select {
+	case <-done:
+		// Process exited
+		p.cmd = nil
+		return nil
+	case <-time.After(2 * time.Second):
+		// Force kill if it doesn't exit within 2 seconds
+		p.cmd.Process.Kill()
+		p.cmd = nil
+		return nil
+	}
 }
 
 func (p *Player) Restart(url string) error {
 	_ = p.Stop()
-	// slight delay to allow ffplay to exit
-	time.Sleep(200 * time.Millisecond)
 	return p.Start(url)
 }
 
@@ -247,7 +267,11 @@ func interactiveMode(ctx context.Context, p *Player, stations []Station, startId
 				p.currentStation = idx
 				now = stations[p.currentStation]
 				fmt.Println("Switching to:", now.Name)
-				_ = p.Restart(now.URL)
+				if err := p.Restart(now.URL); err != nil {
+					fmt.Printf("Failed to start station: %v\n", err)
+				} else {
+					fmt.Println("✓ Now playing:", now.Name)
+				}
 			} else {
 				fmt.Println("Invalid station number")
 			}
