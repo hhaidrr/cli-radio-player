@@ -50,7 +50,7 @@ func (p *Player) ffplayArgs(url string) []string {
 	args := []string{
 		"-nodisp",
 		"-autoexit",
-		"-loglevel", "error", // Reduce log level to only show errors
+		"-loglevel", "warning", // Keep warning level for audio processing
 		"-hide_banner", // Hide ffplay banner
 		"-af", volFilter,
 		url,
