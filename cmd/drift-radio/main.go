@@ -37,10 +37,18 @@ type Player struct {
 	volumePercent  int
 	isStopped      bool
 	visualization  bool
+	analyzer       *StreamAnalyzer
+	showStats      bool
 }
 
 func NewPlayer() *Player {
-	return &Player{currentStation: 0, volumePercent: 70, visualization: false}
+	return &Player{
+		currentStation: 0,
+		volumePercent:  70,
+		visualization:  false,
+		analyzer:       NewStreamAnalyzer(),
+		showStats:      false,
+	}
 }
 
 func (p *Player) ffplayArgs(url string) []string {
@@ -72,6 +80,13 @@ func (p *Player) Start(url string) error {
 	if err != nil {
 		return err
 	}
+
+	// Start stream analysis
+	if err := p.analyzer.StartAnalysis(resolved); err != nil {
+		// Don't fail the entire start if analysis fails
+		fmt.Printf("Warning: Could not start stream analysis: %v\n", err)
+	}
+
 	args := p.ffplayArgs(resolved)
 	p.cmd = exec.Command("ffplay", args...)
 	p.cmd.Stdout = os.Stdout
@@ -95,9 +110,13 @@ func (p *Player) Stop() error {
 	defer p.mu.Unlock()
 	if p.cmd == nil || p.cmd.Process == nil {
 		p.isStopped = true
+		p.analyzer.StopAnalysis()
 		return nil
 	}
 	p.isStopped = true
+
+	// Stop stream analysis
+	p.analyzer.StopAnalysis()
 
 	// Send SIGTERM to stop the process
 	if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
@@ -190,6 +209,42 @@ func (p *Player) SetVolume(percent int) {
 	p.volumePercent = percent
 }
 
+func (p *Player) ToggleStats() {
+	p.showStats = !p.showStats
+	state := "OFF"
+	if p.showStats {
+		state = "ON"
+	}
+	fmt.Printf("Stream quality stats: %s\n", state)
+}
+
+func (p *Player) ShowStats() {
+	if p.analyzer != nil {
+		fmt.Print(p.analyzer.FormatStats())
+	} else {
+		fmt.Println("No stream analysis available")
+	}
+}
+
+func (p *Player) displayStatsLoop(ctx context.Context) {
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if p.showStats && !p.isStopped {
+				// Clear screen and show stats
+				fmt.Print("\033[2J\033[H") // Clear screen and move cursor to top
+				fmt.Print(p.analyzer.FormatStats())
+				fmt.Print("radio> ")
+			}
+		}
+	}
+}
+
 func printHeader(volume int, nowPlaying string) {
 	fmt.Printf("\n\U0001F50A Volume set to %d%%\n", volume)
 	fmt.Printf("\U0001F3B5 Now Playing: %s\n", nowPlaying)
@@ -203,6 +258,8 @@ func printHelp() {
 	fmt.Println("  [v] Change volume")
 	fmt.Println("  [l] List all stations")
 	fmt.Println("  [viz] Toggle visualization")
+	fmt.Println("  [stats] Toggle stream quality stats")
+	fmt.Println("  [show] Show current stream stats")
 	fmt.Println("  [q] Quit")
 	fmt.Println("  [h] Show this help")
 	fmt.Println("  [1-5] Switch station")
@@ -227,6 +284,12 @@ func interactiveMode(ctx context.Context, p *Player, stations []Station, startId
 	_ = p.Start(now.URL)
 	printHelp()
 	fmt.Println("Press any key to continue...")
+
+	// Start real-time stats display
+	statsCtx, statsCancel := context.WithCancel(ctx)
+	defer statsCancel()
+	go p.displayStatsLoop(statsCtx)
+
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Print("radio> ")
 	for {
@@ -268,6 +331,10 @@ func interactiveMode(ctx context.Context, p *Player, stations []Station, startId
 				state = "ON"
 			}
 			fmt.Println("Visualization:", state)
+		case "stats":
+			p.ToggleStats()
+		case "show":
+			p.ShowStats()
 		case "1", "2", "3", "4", "5":
 			idx := int(input[0] - '1')
 			if idx >= 0 && idx < len(stations) {
