@@ -38,7 +38,6 @@ type Player struct {
 	isStopped      bool
 	visualization  bool
 	analyzer       *StreamAnalyzer
-	showStats      bool
 }
 
 func NewPlayer() *Player {
@@ -47,7 +46,6 @@ func NewPlayer() *Player {
 		volumePercent:  70,
 		visualization:  false,
 		analyzer:       NewStreamAnalyzer(),
-		showStats:      false,
 	}
 }
 
@@ -209,20 +207,18 @@ func (p *Player) SetVolume(percent int) {
 	p.volumePercent = percent
 }
 
-func (p *Player) ToggleStats() {
-	p.showStats = !p.showStats
-	state := "OFF"
-	if p.showStats {
-		state = "ON"
+func (p *Player) showQualityAlerts() {
+	if p.analyzer == nil {
+		return
 	}
-	fmt.Printf("Stream quality stats: %s\n", state)
-}
 
-func (p *Player) ShowStats() {
-	if p.analyzer != nil {
-		fmt.Print(p.analyzer.FormatStats())
-	} else {
-		fmt.Println("No stream analysis available")
+	alerts := p.analyzer.GetQualityAlerts()
+
+	if len(alerts) > 0 {
+		fmt.Println("\n⚠️  Quality Alerts:")
+		for _, alert := range alerts {
+			fmt.Printf("   • %s\n", alert)
+		}
 	}
 }
 
@@ -235,10 +231,20 @@ func (p *Player) displayStatsLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if p.showStats && !p.isStopped {
+			if !p.isStopped {
 				// Clear screen and show stats
 				fmt.Print("\033[2J\033[H") // Clear screen and move cursor to top
 				fmt.Print(p.analyzer.FormatStats())
+
+				// Show quality alerts
+				alerts := p.analyzer.GetQualityAlerts()
+				if len(alerts) > 0 {
+					fmt.Println("\n⚠️  Quality Alerts:")
+					for _, alert := range alerts {
+						fmt.Printf("   • %s\n", alert)
+					}
+				}
+
 				fmt.Print("radio> ")
 			}
 		}
@@ -258,11 +264,11 @@ func printHelp() {
 	fmt.Println("  [v] Change volume")
 	fmt.Println("  [l] List all stations")
 	fmt.Println("  [viz] Toggle visualization")
-	fmt.Println("  [stats] Toggle stream quality stats")
-	fmt.Println("  [show] Show current stream stats")
 	fmt.Println("  [q] Quit")
 	fmt.Println("  [h] Show this help")
 	fmt.Println("  [1-5] Switch station")
+	fmt.Println()
+	fmt.Println("📊 Stream quality stats are displayed automatically")
 	fmt.Println()
 }
 
@@ -283,9 +289,8 @@ func interactiveMode(ctx context.Context, p *Player, stations []Station, startId
 	printHeader(p.volumePercent, now.Name)
 	_ = p.Start(now.URL)
 	printHelp()
-	fmt.Println("Press any key to continue...")
 
-	// Start real-time stats display
+	// Start real-time stats display immediately
 	statsCtx, statsCancel := context.WithCancel(ctx)
 	defer statsCancel()
 	go p.displayStatsLoop(statsCtx)
@@ -331,10 +336,6 @@ func interactiveMode(ctx context.Context, p *Player, stations []Station, startId
 				state = "ON"
 			}
 			fmt.Println("Visualization:", state)
-		case "stats":
-			p.ToggleStats()
-		case "show":
-			p.ShowStats()
 		case "1", "2", "3", "4", "5":
 			idx := int(input[0] - '1')
 			if idx >= 0 && idx < len(stations) {
@@ -414,5 +415,11 @@ func main() {
 		os.Exit(1)
 	}
 	printHelp()
+
+	// Start real-time stats display
+	statsCtx, statsCancel := context.WithCancel(ctx)
+	defer statsCancel()
+	go p.displayStatsLoop(statsCtx)
+
 	<-ctx.Done()
 }
