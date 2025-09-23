@@ -223,7 +223,7 @@ func (p *Player) showQualityAlerts() {
 }
 
 func (p *Player) displayStatsLoop(ctx context.Context) {
-	ticker := time.NewTicker(3 * time.Second)
+	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
